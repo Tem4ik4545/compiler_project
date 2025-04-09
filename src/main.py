@@ -1,40 +1,54 @@
 import sys
+from antlr4 import FileStream, CommonTokenStream
 from src.lexer.MyLangLexer import MyLangLexer
 from src.parser.MyLangParser import MyLangParser
+from src.AST.ASTBuilder import ASTBuilder
+from src.semantic.semantic_analyzer import SemanticAnalyzer
 from src.IR.ir_generator import IRGenerator
-from src.codegen.codegen import CodeGenerator
+from src.optimizer.ir_optimizer import IROptimizer
+from src.Nasm.nasm_generator import NASMGenerator
+import os
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python lexerANDparser-test.py <source_file>")
-        return
+def compile_source(source_file: str, output_file: str):
+    print(f"🔧 Компиляция файла: {source_file}")
 
-    source_file = sys.argv[1]
+    # 1. Лексер и парсер
+    input_stream = FileStream(source_file, encoding="utf-8")
+    lexer = MyLangLexer(input_stream)
+    token_stream = CommonTokenStream(lexer)
+    parser = MyLangParser(token_stream)
+    tree = parser.program()
 
-    # Читаем исходный код
-    with open(source_file, 'r', encoding='utf-8') as f:
-        source_code = f.read()
+    # 2. Построение AST
+    ast = ASTBuilder().visit(tree)
+    print("✅ AST построено")
 
-    # Лексический анализ
-    lexer = MyLangLexer(source_code)
-    tokens = lexer.tokenize()
+    # 3. Семантический анализ
+    SemanticAnalyzer().analyze(ast)
+    print("✅ Семантический анализ пройден")
 
-    # Синтаксический анализ
-    parser = MyLangParser(tokens)
-    syntax_tree = parser.parse()
+    # 4. Генерация IR
+    ir = IRGenerator().generate(ast)
+    print("✅ IR сгенерирован")
 
-    # Генерация IR
-    ir_generator = IRGenerator(syntax_tree)
-    ir_code = ir_generator.generate()
+    # 5. Оптимизация IR
+    optimized_ir = IROptimizer().optimize(ir)
+    print("✅ IR оптимизирован")
 
-    # Генерация машинного кода
-    codegen = CodeGenerator(ir_code)
-    compiled_code = codegen.compile()
-
-    print("Compilation successful!")
-    print(compiled_code)
+    # 6. Генерация NASM
+    nasm_code = NASMGenerator().generate(optimized_ir)
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(nasm_code)
+    print(f"✅ NASM-код сохранён в {output_file}")
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) < 3:
+        print("❗ Использование: python main.py <входной_файл.my> <выходной_файл.asm>")
+        sys.exit(1)
+
+    source_path = sys.argv[1]
+    output_path = sys.argv[2]
+    compile_source(source_path, output_path)

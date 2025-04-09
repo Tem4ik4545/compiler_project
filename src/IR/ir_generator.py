@@ -88,10 +88,11 @@ class IRGenerator:
         self.instructions.append(IRLabel(end_label))
 
     def visit_FunctionDeclaration(self, node):
-        self.instructions.append(IRLabel(f"func_{node.name}"))
+        self.instructions.append(IRFunctionStart(f"func_{node.name}", [name for name, _ in node.params]))
         for stmt in node.body.statements:
             if stmt is not None:
                 self.visit(stmt)
+        self.instructions.append(IRFunctionEnd(f"func_{node.name}"))
 
     def visit_ReturnStatement(self, node):
         value = self.visit(node.value) if node.value else None

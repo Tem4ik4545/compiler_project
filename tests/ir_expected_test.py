@@ -131,9 +131,16 @@ for_end_1:
             }
             """,
             """
+<<<<<<< HEAD
 func_sum:
 t0 = a + b
 return t0
+=======
+sum:
+t0 = a + b
+return t0
+; end sum
+>>>>>>> 7655300 (Initial commit)
 t1 = call sum(1, 2)
 print t1
             """,

@@ -1,5 +1,5 @@
 from src.IR.instructions import *
-from src.IR.ir_optimizer import IROptimizer
+from src.optimizer.ir_optimizer import IROptimizer
 
 def run_optimization_test(name, original_ir, expected_ir):
     print(f"\n=== Тест оптимизации IR: {name} ===")
