@@ -54,8 +54,7 @@ class IRCall(IRInstruction):
     def __repr__(self):
         return f"{self.target} = call {self.name}({', '.join(self.args)})"
 
-<<<<<<< HEAD
-=======
+
 class IRFunctionStart:
     def __init__(self, name, params=None):
         self.name = name
@@ -69,7 +68,7 @@ class IRFunctionEnd:
         self.name = name
     def __str__(self):
         return f"; end {self.name}"
->>>>>>> 7655300 (Initial commit)
+
 
 class IRBinary(IRInstruction):
     def __init__(self, result, left, op, right):
