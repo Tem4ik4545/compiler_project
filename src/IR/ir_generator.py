@@ -5,8 +5,14 @@ class IRGenerator:
     def __init__(self):
         self.temp = TempManager()
         self.instructions = []
+        self.defined_funcs = set()
+        self.generated_labels = set()
 
     def generate(self, node):
+        self.instructions = []
+        self.temp = TempManager()
+        self.defined_funcs = set()
+        self.generated_labels = set()
         self.visit(node)
         return self.instructions
 
@@ -15,7 +21,6 @@ class IRGenerator:
             for item in node:
                 self.visit(item)
             return
-
         method = f"visit_{type(node).__name__}"
         return getattr(self, method, self.generic_visit)(node)
 
@@ -24,11 +29,8 @@ class IRGenerator:
 
     def visit_Program(self, node):
         for stmt in node.statements:
-            if stmt is None:
-                continue
-            result = self.visit(stmt)
-            if isinstance(result, list):
-                self.instructions.extend(result)
+            if stmt is not None:
+                self.visit(stmt)
 
     def visit_VarDeclaration(self, node):
         value = self.visit(node.value)
@@ -42,67 +44,57 @@ class IRGenerator:
         value = self.visit(node.expression)
         self.instructions.append(IRPrint(value))
 
-    def visit_Return(self, node):
-        value = self.visit(node.value)
+    def visit_ReturnStatement(self, node):
+        value = self.visit(node.value) if node.value else None
         self.instructions.append(IRReturn(value))
 
     def visit_IfStatement(self, node):
-        else_label = self.temp.new_label("else")
-        end_label = self.temp.new_label("endif")
-
+        else_label = self._unique_label("else")
+        end_label = self._unique_label("endif")
         condition = self.visit(node.condition)
         self.instructions.append(IRIfGoto(f"!{condition}", else_label))
-
         self.visit(node.then_block)
         self.instructions.append(IRGoto(end_label))
-
         self.instructions.append(IRLabel(else_label))
         if node.else_block:
             self.visit(node.else_block)
         self.instructions.append(IRLabel(end_label))
 
     def visit_WhileStatement(self, node):
-        start_label = self.temp.new_label("while_start")
-        end_label = self.temp.new_label("while_end")
-
+        start_label = self._unique_label("while_start")
+        end_label = self._unique_label("while_end")
         self.instructions.append(IRLabel(start_label))
         condition = self.visit(node.condition)
         self.instructions.append(IRIfGoto(f"!{condition}", end_label))
-
         self.visit(node.body)
         self.instructions.append(IRGoto(start_label))
         self.instructions.append(IRLabel(end_label))
 
     def visit_ForStatement(self, node):
         self.visit(node.init)
-        start_label = self.temp.new_label("for_start")
-        end_label = self.temp.new_label("for_end")
-
+        start_label = self._unique_label("for_start")
+        end_label = self._unique_label("for_end")
         self.instructions.append(IRLabel(start_label))
         condition = self.visit(node.condition)
         self.instructions.append(IRIfGoto(f"!{condition}", end_label))
-
         self.visit(node.body)
         self.visit(node.update)
         self.instructions.append(IRGoto(start_label))
         self.instructions.append(IRLabel(end_label))
 
     def visit_FunctionDeclaration(self, node):
-        self.instructions.append(IRFunctionStart(f"func_{node.name}", [name for name, _ in node.params]))
-        for stmt in node.body.statements:
-            if stmt is not None:
-                self.visit(stmt)
-        self.instructions.append(IRFunctionEnd(f"func_{node.name}"))
-
-    def visit_ReturnStatement(self, node):
-        value = self.visit(node.value) if node.value else None
-        self.instructions.append(IRReturn(value))
-
+        func_name = f"func_{node.name}"
+        if func_name in self.defined_funcs:
+            return
+        self.defined_funcs.add(func_name)
+        self.instructions.append(IRFunctionStart(func_name, [name for name, _ in node.params]))
+        self.visit(node.body)
+        self.instructions.append(IRFunctionEnd(func_name))
 
     def visit_FunctionCall(self, node):
         args = [self.visit(arg) for arg in node.arguments]
         result = self.temp.new_temp()
-        self.instructions.append(IRCall(result, node.name, args))
+        self.instructions.append(IRCall(result, f"func_{node.name}", args))
         return result
 
     def visit_BinaryOp(self, node):
@@ -125,52 +117,37 @@ class IRGenerator:
         return str(node.value)
 
     def visit_Block(self, node):
-        if not node.statements:
-            return
         for stmt in node.statements:
-            if stmt is None:
-                continue
-            if isinstance(stmt, list):
-                for sub in stmt:
-                    if sub is not None:
-                        self.visit(sub)
-            else:
+            if stmt is not None:
                 self.visit(stmt)
 
     def visit_TryCatchStatement(self, node):
-        try_label = self.temp.new_label("try")
-        catch_label = self.temp.new_label("catch")
-        end_label = self.temp.new_label("end_try")
-
+        try_label = self._unique_label("try")
+        catch_label = self._unique_label("catch")
+        end_label = self._unique_label("end_try")
         self.instructions.append(IRLabel(try_label))
         self.visit(node.try_block)
         self.instructions.append(IRGoto(end_label))
-
         self.instructions.append(IRLabel(catch_label))
         self.visit(node.catch_block)
-
         self.instructions.append(IRLabel(end_label))
 
     def visit_MatchStatement(self, node):
         expr_temp = self.visit(node.expr)
-        end_label = self.temp.new_label("end_match")
+        end_label = self._unique_label("end_match")
         case_labels = []
 
         for i, case in enumerate(node.cases):
-            label = self.temp.new_label(f"case_{i}")
+            label = self._unique_label(f"case_{i}")
             case_labels.append((label, case))
-            condition_temp = self.visit(case.value)
             cond = self.temp.new_temp()
-            self.instructions.append(IRBinary(cond, expr_temp, "==", condition_temp))
+            self.instructions.append(IRBinary(cond, expr_temp, "==", self.visit(case.value)))
             self.instructions.append(IRIfGoto(cond, label))
 
-        if node.default:
-            default_label = self.temp.new_label("default_case")
-            self.instructions.append(IRGoto(default_label))
-        else:
-            self.instructions.append(IRGoto(end_label))
+        default_label = self._unique_label("default_case") if node.default else end_label
+        self.instructions.append(IRGoto(default_label))
 
-        for (label, case) in case_labels:
+        for label, case in case_labels:
             self.instructions.append(IRLabel(label))
             for stmt in case.body:
                 self.visit(stmt)
@@ -183,3 +160,9 @@ class IRGenerator:
 
         self.instructions.append(IRLabel(end_label))
 
+    def _unique_label(self, prefix: str) -> str:
+        label = self.temp.new_label(prefix)
+        while label in self.generated_labels:
+            label = self.temp.new_label(prefix)
+        self.generated_labels.add(label)
+        return label

@@ -1,15 +1,16 @@
 
 class TempManager:
     def __init__(self):
-        self.temp_count = 0
-        self.label_count = 0
+        self.temp_counter = 0
+        self.label_counter = 0
 
     def new_temp(self):
-        temp = f"t{self.temp_count}"
-        self.temp_count += 1
-        return temp
+        name = f"t{self.temp_counter}"
+        self.temp_counter += 1
+        return name
 
-    def new_label(self, base="label"):
-        label = f"{base}_{self.label_count}"
-        self.label_count += 1
-        return label
+    def new_label(self, prefix="label"):
+        name = f"{prefix}_{self.label_counter}"
+        self.label_counter += 1
+        return name
+

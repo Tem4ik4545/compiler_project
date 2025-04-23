@@ -10,14 +10,16 @@ def check_binary_op(left_type: str, op: str, right_type: str):
         else:
             raise Exception(f"Ошибка: Неверные типы для арифметической операции: {left_type} {op} {right_type}")
     elif op in comparison_ops:
-        if left_type == right_type:
+        if left_type in ("int", "bool") and right_type in ("int", "bool"):
             return "bool"
         else:
             raise Exception(f"Ошибка: Типы для сравнения не совпадают: {left_type} {op} {right_type}")
+
     elif op in logical_ops:
-        if left_type == "bool" and right_type == "bool":
+        if left_type in ("bool", "int") and right_type in ("bool", "int"):
             return "bool"
         else:
             raise Exception(f"Ошибка: Неверные типы для логической операции: {left_type} {op} {right_type}")
+
     else:
         raise Exception(f"Ошибка: Неизвестный оператор '{op}'")
