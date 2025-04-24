@@ -70,7 +70,7 @@ print x
             """,
             """
 if !True goto else_0
-print yes
+print "yes"
 goto endif_1
 else_0:
 endif_1:
@@ -131,17 +131,12 @@ for_end_1:
             }
             """,
             """
-<<<<<<< HEAD
 func_sum:
+params: a, b
 t0 = a + b
 return t0
-=======
-sum:
-t0 = a + b
-return t0
-; end sum
->>>>>>> 7655300 (Initial commit)
-t1 = call sum(1, 2)
+; end func_sum
+t1 = call func_sum(1, 2)
 print t1
             """,
             "function + call"
@@ -158,10 +153,10 @@ print t1
             """,
             """
 try_0:
-print ok
+print "ok"
 goto end_try_2
 catch_1:
-print err
+print "err"
 end_try_2:
             """,
             "try / catch"
@@ -185,13 +180,13 @@ t1 = x == 2
 if t1 goto case_1_2
 goto default_case_3
 case_0_1:
-print one
+print "one"
 goto end_match_0
 case_1_2:
-print two
+print "two"
 goto end_match_0
 default_case_3:
-print other
+print "other"
 end_match_0:
             """,
             "match-case"

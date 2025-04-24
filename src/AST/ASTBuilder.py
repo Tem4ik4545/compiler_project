@@ -136,8 +136,6 @@ class ASTBuilder(MyLangVisitor):
             body = Block(body)
         return FunctionDeclaration(name, params, return_type, body)
 
-    # ========== Expression Rules ==========
-
     def visitExprFunctionCall(self, ctx: MyLangParser.ExprFunctionCallContext):
         name = ctx.ID().getText()
         args = [self.visit(e) for e in ctx.argList().expression()] if ctx.argList() else []

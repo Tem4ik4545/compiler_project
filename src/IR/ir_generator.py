@@ -114,6 +114,8 @@ class IRGenerator:
         return node.name
 
     def visit_Literal(self, node):
+        if isinstance(node.value, str):
+            return f'"{node.value}"'
         return str(node.value)
 
     def visit_Block(self, node):

@@ -5,7 +5,6 @@ from src.AST.Karkas import MatchCase, DefaultCase
 class NASMGenerator:
     def __init__(self):
         self.lines = []
-        self.temp_manager = TempManager()
         self.label_counter = 0
         self.arg_registers = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
         self.func_params = {}
@@ -16,7 +15,6 @@ class NASMGenerator:
 
     def generate(self, instructions):
         self.lines = []
-        self.label_counter = 0
         self.string_literals = {}
         self.defined_labels = set()
         self.defined_functions = set()
@@ -27,7 +25,9 @@ class NASMGenerator:
         self.emit('format_str db "%s", 10, 0')
         self.emit('True dq 1')
         self.emit('False dq 0')
+
         self.collect_variables(instructions)
+        self.extract_string_literals(instructions)
         self.emit_string_literals()
 
         self.emit("\nsection .text")
@@ -40,13 +40,29 @@ class NASMGenerator:
                 self.translate(instr)
 
         self.emit("_start:")
+
+        # вызываем последнюю пользовательскую функцию (не main, не _start)
+        last_func = None
+        for instr in reversed(instructions):
+            if isinstance(instr, IRFunctionStart) and instr.name not in {"_start", "func_main"}:
+                last_func = instr
+                break
+
+        if last_func:
+            for i, arg in enumerate(last_func.params):
+                if i < len(self.arg_registers):
+                    self.emit(f"mov {self.arg_registers[i]}, {i+1}")
+            self.emit(f"call {last_func.name}")
+            self.emit("mov rsi, rax")
+            self.emit("mov rdi, format")
+            self.emit("xor rax, rax")
+            self.emit("call printf")
+
         for instr in instructions:
             if not isinstance(instr, IRFunctionStart) or instr.name == "func_main":
                 self.translate(instr)
 
-        self.emit("; Wait for key press before exit")
         self.emit("call getchar")
-        self.emit("; Exit syscall")
         self.emit("mov rax, 60")
         self.emit("xor rdi, rdi")
         self.emit("syscall")
@@ -57,9 +73,21 @@ class NASMGenerator:
         self.lines.append(line)
 
     def emit_string_literals(self):
-        for name, text in self.string_literals.items():
-            escaped = text.encode('unicode_escape').decode().replace('"', '')
-            self.emit(f'{name} db "{escaped}", 0')
+        for name, value in self.string_literals.items():
+            self.emit(f'{name} db "{value}", 0')
+
+    def extract_string_literals(self, instructions):
+        for instr in instructions:
+            for val in vars(instr).values():
+                self._check_and_store_string(val)
+
+    def _check_and_store_string(self, val):
+        if isinstance(val, str) and val.startswith('"') and val.endswith('"'):
+            value = val.strip('"')
+            if value not in self.string_literals.values():
+                name = f"str_{self.string_counter}"
+                self.string_literals[name] = value
+                self.string_counter += 1
 
     def collect_variables(self, instructions):
         seen = set()
@@ -68,9 +96,7 @@ class NASMGenerator:
         for instr in instructions:
             for attr in vars(instr).values():
                 if isinstance(attr, str) and attr.isidentifier():
-                    if any(attr.startswith(p) for p in skip_prefixes):
-                        continue
-                    if attr in func_names:
+                    if any(attr.startswith(p) for p in skip_prefixes) or attr in func_names:
                         continue
                     if attr not in seen:
                         self.emit(f"{attr} dq 0")
@@ -79,10 +105,10 @@ class NASMGenerator:
     def resolve_value(self, val):
         if isinstance(val, str):
             if val.startswith('"') and val.endswith('"'):
-                name = f"str_{self.string_counter}"
-                self.string_counter += 1
-                self.string_literals[name] = val.strip('"')
-                return f"rel {name}"
+                text = val.strip('"')
+                for name, value in self.string_literals.items():
+                    if value == text:
+                        return f"[rel {name}]"
             elif not val.isnumeric():
                 return f"qword [rel {val}]"
         return str(val)
@@ -99,10 +125,6 @@ class NASMGenerator:
             for i, param in enumerate(instr.params):
                 if i < len(self.arg_registers):
                     self.emit(f"mov qword [rel {param}], {self.arg_registers[i]}")
-                else:
-                    offset = 16 + 8 * (i - len(self.arg_registers))
-                    self.emit(f"mov rax, [rbp+{offset}]")
-                    self.emit(f"mov qword [rel {param}], rax")
 
         elif isinstance(instr, IRFunctionEnd):
             self.emit("pop rbp")
@@ -114,22 +136,23 @@ class NASMGenerator:
 
         elif isinstance(instr, IRBinary):
             self.emit(f"mov rax, {self.resolve_value(instr.left)}")
-            ops = {"+": "add", "-": "sub", "*": "imul", "/": "idiv"}
-            cmps = {"<": "setl", ">": "setg", "==": "sete", "!=": "setne"}
-            if instr.op in ops:
-                if instr.op == "/":
+            op = instr.op
+            if op in {"+", "-", "*", "/"}:
+                if op == "/":
                     self.emit("cqo")
                     self.emit(f"mov rbx, {self.resolve_value(instr.right)}")
                     self.emit("idiv rbx")
                 else:
-                    self.emit(f"{ops[instr.op]} rax, {self.resolve_value(instr.right)}")
+                    ops = {"+": "add", "-": "sub", "*": "imul"}
+                    self.emit(f"{ops[op]} rax, {self.resolve_value(instr.right)}")
                 self.emit(f"mov qword [rel {instr.result}], rax")
-            elif instr.op in cmps:
+            elif op in {"==", "!=", "<", ">"}:
+                cmps = {"==": "sete", "!=": "setne", "<": "setl", ">": "setg"}
                 self.emit(f"cmp rax, {self.resolve_value(instr.right)}")
-                self.emit(f"{cmps[instr.op]} al")
+                self.emit(f"{cmps[op]} al")
                 self.emit("movzx rax, al")
                 self.emit(f"mov qword [rel {instr.result}], rax")
-            elif instr.op in {"&&", "||"}:
+            elif op in {"&&", "||"}:
                 self.translate_logical(instr)
 
         elif isinstance(instr, IRUnary):
@@ -142,9 +165,9 @@ class NASMGenerator:
 
         elif isinstance(instr, IRPrint):
             val = self.resolve_value(instr.value)
-            if val.startswith("rel str_"):
-                self.emit(f"mov rsi, {val}")
+            if val.startswith("[rel str_"):
                 self.emit("mov rdi, format_str")
+                self.emit(f"lea rsi, {val}")
             else:
                 self.emit(f"mov rsi, {val}")
                 self.emit("mov rdi, format")
@@ -157,8 +180,8 @@ class NASMGenerator:
         elif isinstance(instr, IRIfGoto):
             cond = instr.condition
             if isinstance(cond, str) and cond.startswith("!"):
-                real_cond = cond[1:]
-                self.emit(f"mov rax, {self.resolve_value(real_cond)}")
+                cond = cond[1:]
+                self.emit(f"mov rax, {self.resolve_value(cond)}")
                 self.emit("cmp rax, 0")
                 self.emit(f"je {instr.label}")
             else:
@@ -167,17 +190,17 @@ class NASMGenerator:
                 self.emit(f"jne {instr.label}")
 
         elif isinstance(instr, IRLabel):
-            if instr.label in self.defined_labels:
-                return
-            self.defined_labels.add(instr.label)
-            self.emit(f"{instr.label}:")
+            if instr.label not in self.defined_labels:
+                self.defined_labels.add(instr.label)
+                self.emit(f"{instr.label}:")
 
         elif isinstance(instr, IRCall):
             for i, arg in enumerate(instr.args):
+                val = self.resolve_value(arg)
                 if i < len(self.arg_registers):
-                    self.emit(f"mov {self.arg_registers[i]}, {self.resolve_value(arg)}")
+                    self.emit(f"mov {self.arg_registers[i]}, {val}")
                 else:
-                    self.emit(f"push {self.resolve_value(arg)}")
+                    self.emit(f"push {val}")
             self.emit(f"call {instr.name}")
             if len(instr.args) > len(self.arg_registers):
                 self.emit(f"add rsp, {8 * (len(instr.args) - len(self.arg_registers))}")
@@ -187,9 +210,6 @@ class NASMGenerator:
             self.emit(f"mov rax, {self.resolve_value(instr.value)}")
             self.emit("pop rbp")
             self.emit("ret")
-
-        elif isinstance(instr, IRTryCatch):
-            self.emit("; try/catch not supported in NASM runtime")
 
         elif isinstance(instr, MatchCase):
             self.emit(f"{instr.label}:")

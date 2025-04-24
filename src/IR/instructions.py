@@ -51,8 +51,10 @@ class IRCall(IRInstruction):
         self.target = target
         self.name = name
         self.args = args
+
     def __repr__(self):
-        return f"{self.target} = call {self.name}({', '.join(self.args)})"
+        args_str = ', '.join(map(str, self.args))
+        return f"{self.target} = call {self.name}({args_str})"
 
 
 class IRFunctionStart:

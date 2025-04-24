@@ -23,6 +23,7 @@ t10 dq 0
 t11 dq 0
 a dq 0
 b dq 0
+str_0 db "Hello, MyLang!", 0
 
 section .text
 extern printf
@@ -34,6 +35,17 @@ mov rbp, rsp
 mov qword [rel a], rdi
 mov qword [rel b], rsi
 _start:
+mov rdi, 1
+mov rsi, 2
+call func_add
+mov rsi, rax
+mov rdi, format
+xor rax, rax
+call printf
+mov rdi, format_str
+lea rsi, [rel str_0]
+xor rax, rax
+call printf
 mov rsi, 42
 mov rdi, format
 xor rax, rax
@@ -187,9 +199,7 @@ mov qword [rel t11], rax
 mov rax, qword [rel t11]
 pop rbp
 ret
-; Wait for key press before exit
 call getchar
-; Exit syscall
 mov rax, 60
 xor rdi, rdi
 syscall

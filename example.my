@@ -1,6 +1,6 @@
 {
 
-
+    print("Hello, MyLang!");
     print(42);
     let x: int = 5;
     let y: int = 10;
@@ -57,7 +57,7 @@
     let r: int = total7(1, 2, 3, 4, 5, 6, 7);
     print(r);
 
-    print("Hello, MyLang!");
+
 
 
 }
