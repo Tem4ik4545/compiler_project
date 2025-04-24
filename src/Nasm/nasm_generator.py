@@ -41,7 +41,6 @@ class NASMGenerator:
 
         self.emit("_start:")
 
-        # вызываем последнюю пользовательскую функцию (не main, не _start)
         last_func = None
         for instr in reversed(instructions):
             if isinstance(instr, IRFunctionStart) and instr.name not in {"_start", "func_main"}:
@@ -136,32 +135,26 @@ class NASMGenerator:
 
         elif isinstance(instr, IRBinary):
             self.emit(f"mov rax, {self.resolve_value(instr.left)}")
-            op = instr.op
-            if op in {"+", "-", "*", "/"}:
-                if op == "/":
-                    self.emit("cqo")
-                    self.emit(f"mov rbx, {self.resolve_value(instr.right)}")
-                    self.emit("idiv rbx")
-                else:
-                    ops = {"+": "add", "-": "sub", "*": "imul"}
-                    self.emit(f"{ops[op]} rax, {self.resolve_value(instr.right)}")
-                self.emit(f"mov qword [rel {instr.result}], rax")
-            elif op in {"==", "!=", "<", ">"}:
+            if instr.op == "/":
+                self.emit("cqo")
+                self.emit(f"mov rbx, {self.resolve_value(instr.right)}")
+                self.emit("idiv rbx")
+            elif instr.op in {"+", "-", "*"}:
+                ops = {"+": "add", "-": "sub", "*": "imul"}
+                self.emit(f"{ops[instr.op]} rax, {self.resolve_value(instr.right)}")
+            elif instr.op in {"==", "!=", "<", ">"}:
                 cmps = {"==": "sete", "!=": "setne", "<": "setl", ">": "setg"}
                 self.emit(f"cmp rax, {self.resolve_value(instr.right)}")
-                self.emit(f"{cmps[op]} al")
+                self.emit(f"{cmps[instr.op]} al")
                 self.emit("movzx rax, al")
-                self.emit(f"mov qword [rel {instr.result}], rax")
-            elif op in {"&&", "||"}:
-                self.translate_logical(instr)
+            self.emit(f"mov qword [rel {instr.result}], rax")
 
-        elif isinstance(instr, IRUnary):
-            if instr.op == "!":
-                self.emit(f"mov rax, {self.resolve_value(instr.operand)}")
-                self.emit("cmp rax, 0")
-                self.emit("sete al")
-                self.emit("movzx rax, al")
-                self.emit(f"mov qword [rel {instr.result}], rax")
+        elif isinstance(instr, IRUnary) and instr.op == "!":
+            self.emit(f"mov rax, {self.resolve_value(instr.operand)}")
+            self.emit("cmp rax, 0")
+            self.emit("sete al")
+            self.emit("movzx rax, al")
+            self.emit(f"mov qword [rel {instr.result}], rax")
 
         elif isinstance(instr, IRPrint):
             val = self.resolve_value(instr.value)
@@ -225,19 +218,11 @@ class NASMGenerator:
 
     def translate_logical(self, instr):
         self.emit("cmp rax, 0")
-        if instr.op == "&&":
-            self.emit("sete al")
-        else:
-            self.emit("setne al")
+        self.emit("setne al" if instr.op == "||" else "sete al")
         self.emit("movzx rbx, al")
         self.emit(f"mov rax, {self.resolve_value(instr.right)}")
         self.emit("cmp rax, 0")
-        if instr.op == "&&":
-            self.emit("sete al")
-            self.emit("movzx rax, al")
-            self.emit("and rax, rbx")
-        else:
-            self.emit("setne al")
-            self.emit("movzx rax, al")
-            self.emit("or rax, rbx")
+        self.emit("setne al" if instr.op == "||" else "sete al")
+        self.emit("movzx rax, al")
+        self.emit("or rax, rbx" if instr.op == "||" else "and rax, rbx")
         self.emit(f"mov qword [rel {instr.result}], rax")

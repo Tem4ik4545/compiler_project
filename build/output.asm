@@ -72,14 +72,6 @@ sete al
 movzx rax, al
 mov qword [rel t2], rax
 mov rax, qword [rel y]
-cmp rax, 0
-sete al
-movzx rbx, al
-mov rax, qword [rel t2]
-cmp rax, 0
-sete al
-movzx rax, al
-and rax, rbx
 mov qword [rel t3], rax
 mov rax, qword [rel x]
 cmp rax, qword [rel t3]
