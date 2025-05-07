@@ -6,12 +6,14 @@ class NASMGenerator:
     def __init__(self):
         self.lines = []
         self.label_counter = 0
-        self.arg_registers = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
+        self.win64_registers = ["rcx", "rdx", "r8", "r9"]
         self.func_params = {}
         self.string_literals = {}
         self.string_counter = 0
         self.defined_labels = set()
         self.defined_functions = set()
+        self.shadow_space = 32
+        self.defined_variables = set()
 
     def generate(self, instructions):
         self.lines = []
@@ -31,41 +33,25 @@ class NASMGenerator:
         self.emit_string_literals()
 
         self.emit("\nsection .text")
+        self.emit("default rel")
         self.emit("extern printf")
-        self.emit("extern getchar")
-        self.emit("global _start")
+        self.emit("extern ExitProcess")
+        self.emit("global main")
 
         for instr in instructions:
-            if isinstance(instr, IRFunctionStart) and instr.name != "func_main":
+            if isinstance(instr, IRFunctionStart):
                 self.translate(instr)
 
-        self.emit("_start:")
-
-        last_func = None
-        for instr in reversed(instructions):
-            if isinstance(instr, IRFunctionStart) and instr.name not in {"_start", "func_main"}:
-                last_func = instr
-                break
-
-        if last_func:
-            for i, arg in enumerate(last_func.params):
-                if i < len(self.arg_registers):
-                    self.emit(f"mov {self.arg_registers[i]}, {i+1}")
-            self.emit(f"call {last_func.name}")
-            self.emit("mov rsi, rax")
-            self.emit("mov rdi, format")
-            self.emit("xor rax, rax")
-            self.emit("call printf")
+        self.emit("main:")
+        self.emit("sub rsp, 40")
 
         for instr in instructions:
-            if not isinstance(instr, IRFunctionStart) or instr.name == "func_main":
+            if not isinstance(instr, IRFunctionStart):
                 self.translate(instr)
 
-        self.emit("call getchar")
-        self.emit("mov rax, 60")
-        self.emit("xor rdi, rdi")
-        self.emit("syscall")
-
+        self.emit("xor ecx, ecx")
+        self.emit("call ExitProcess")
+        self.emit("add rsp, 40")
         return "\n".join(self.lines)
 
     def emit(self, line):
@@ -73,7 +59,7 @@ class NASMGenerator:
 
     def emit_string_literals(self):
         for name, value in self.string_literals.items():
-            self.emit(f'{name} db "{value}", 0')
+            self.emit(f'{name} db "{value}", 10, 0')
 
     def extract_string_literals(self, instructions):
         for instr in instructions:
@@ -90,40 +76,68 @@ class NASMGenerator:
 
     def collect_variables(self, instructions):
         seen = set()
-        skip_prefixes = ("case_", "default_case", "end_match", "else_", "endif_", "while_", "for_", "try_", "catch_", "end_try")
+        skip_prefixes = (
+        "case_", "default_case", "end_match", "else_", "endif_", "while_", "for_", "try_", "catch_", "end_try")
         func_names = {instr.name for instr in instructions if isinstance(instr, IRFunctionStart)}
+
         for instr in instructions:
-            for attr in vars(instr).values():
-                if isinstance(attr, str) and attr.isidentifier():
-                    if any(attr.startswith(p) for p in skip_prefixes) or attr in func_names:
-                        continue
-                    if attr not in seen:
-                        self.emit(f"{attr} dq 0")
-                        seen.add(attr)
+            if isinstance(instr, IRFunctionStart):
+                for param in instr.params:
+                    if param not in seen and param not in func_names:
+                        self.emit(f"{param} dq 0")
+                        seen.add(param)
+                        self.defined_variables.add(param)
+
+        for instr in instructions:
+            if isinstance(instr, IRAssign):
+                self._add_variable(instr.target, seen, skip_prefixes, func_names)
+            if hasattr(instr, "result"):
+                self._add_variable(instr.result, seen, skip_prefixes, func_names)
+
+    def _add_variable(self, var_name, seen, skip_prefixes, func_names):
+        if (var_name and
+                var_name not in seen and
+                not any(var_name.startswith(p) for p in skip_prefixes) and
+                var_name not in func_names and
+                not var_name.startswith("str_")):
+            self.emit(f"{var_name} dq 0")
+            seen.add(var_name)
+            self.defined_variables.add(var_name)
 
     def resolve_value(self, val):
         if isinstance(val, str):
-            if val.startswith('"') and val.endswith('"'):
+            if val.startswith('"'):
                 text = val.strip('"')
                 for name, value in self.string_literals.items():
                     if value == text:
                         return f"[rel {name}]"
-            elif not val.isnumeric():
-                return f"qword [rel {val}]"
+            elif val in self.defined_variables:
+                return f"[rel {val}]"
+            elif val == "True":
+                return "[rel True]"
+            elif val == "False":
+                return "[rel False]"
+            elif val.isnumeric():
+                return val
         return str(val)
 
     def translate(self, instr):
+
         if isinstance(instr, IRFunctionStart):
             if instr.name in self.defined_functions:
                 return
             self.defined_functions.add(instr.name)
-            self.func_params[instr.name] = instr.params
             self.emit(f"{instr.name}:")
             self.emit("push rbp")
             self.emit("mov rbp, rsp")
             for i, param in enumerate(instr.params):
-                if i < len(self.arg_registers):
-                    self.emit(f"mov qword [rel {param}], {self.arg_registers[i]}")
+                if i < 4:
+                    reg = self.win64_registers[i]
+                    self.emit(f"mov [rel {param}], {reg}")
+                else:
+                    offset = 8 * (i - 4) + 32
+                    self.emit(f"mov rax, [rbp + {offset}]")
+                    self.emit(f"mov [rel {param}], rax")
 
         elif isinstance(instr, IRFunctionEnd):
             self.emit("pop rbp")
@@ -156,16 +170,22 @@ class NASMGenerator:
             self.emit("movzx rax, al")
             self.emit(f"mov qword [rel {instr.result}], rax")
 
+
         elif isinstance(instr, IRPrint):
             val = self.resolve_value(instr.value)
+            self.emit("sub rsp, 40")
             if val.startswith("[rel str_"):
-                self.emit("mov rdi, format_str")
-                self.emit(f"lea rsi, {val}")
+                self.emit(f"lea rdx, {val}")
+                self.emit("mov rcx, format_str")
             else:
-                self.emit(f"mov rsi, {val}")
-                self.emit("mov rdi, format")
+                if val.isdigit():
+                    self.emit(f"mov rdx, {val}")
+                else:
+                    self.emit(f"mov rdx, {val}")
+                self.emit("mov rcx, format")
             self.emit("xor rax, rax")
             self.emit("call printf")
+            self.emit("add rsp, 40")
 
         elif isinstance(instr, IRGoto):
             self.emit(f"jmp {instr.label}")
@@ -187,17 +207,23 @@ class NASMGenerator:
                 self.defined_labels.add(instr.label)
                 self.emit(f"{instr.label}:")
 
+
         elif isinstance(instr, IRCall):
             for i, arg in enumerate(instr.args):
-                val = self.resolve_value(arg)
-                if i < len(self.arg_registers):
-                    self.emit(f"mov {self.arg_registers[i]}, {val}")
+                resolved = self.resolve_value(arg)
+                if i < 4:
+                    self.emit(f"mov {self.win64_registers[i]}, {resolved}")
                 else:
-                    self.emit(f"push {val}")
+                    offset = 32 + (i - 4) * 8
+                    self.emit(f"mov [rsp + {offset}], {resolved}")
+            stack_space = max(32, 8 * len(instr.args))
+            stack_space = (stack_space + 15) & ~15
+            self.emit(f"sub rsp, {stack_space}")
             self.emit(f"call {instr.name}")
-            if len(instr.args) > len(self.arg_registers):
-                self.emit(f"add rsp, {8 * (len(instr.args) - len(self.arg_registers))}")
-            self.emit(f"mov qword [rel {instr.target}], rax")
+            self.emit(f"add rsp, {stack_space}")
+            if instr.target:
+                self.emit(f"mov [rel {instr.target}], rax")
+
 
         elif isinstance(instr, IRReturn):
             self.emit(f"mov rax, {self.resolve_value(instr.value)}")

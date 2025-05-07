@@ -68,6 +68,13 @@ def main():
         }
 
         print(sum(2, 3));
+        
+        function add(a: int, b: int): int {
+        return a + b;
+        }
+
+        let res: int = add(7, 8);
+        print(res);
     }
     '''
 
