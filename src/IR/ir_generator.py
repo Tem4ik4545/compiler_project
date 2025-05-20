@@ -34,7 +34,10 @@ class IRGenerator:
 
     def visit_VarDeclaration(self, node):
         value = self.visit(node.value)
-        self.instructions.append(IRAssign(node.name, value))
+        if isinstance(value, (IRCall, IRBinary, IRUnary)):
+            self.instructions.append(IRAssign(node.name, value.result))
+        else:
+            self.instructions.append(IRAssign(node.name, value))
 
     def visit_Assignment(self, node):
         value = self.visit(node.value)
@@ -45,14 +48,33 @@ class IRGenerator:
         self.instructions.append(IRPrint(value))
 
     def visit_ReturnStatement(self, node):
-        value = self.visit(node.value) if node.value else None
-        self.instructions.append(IRReturn(value))
+        if node.value is None:
+            self.instructions.append(IRReturn(None))
+            return
+
+        if isinstance(node.value, (IRBinary, IRUnary, IRCall)):
+            # временно сохраним текущие инструкции
+            old_instructions = self.instructions
+            self.instructions = []
+            val = self.visit(node.value)
+            instrs = self.instructions
+            self.instructions = old_instructions
+            self.instructions.extend(instrs)
+            self.instructions.append(IRReturn(val))
+        else:
+            value = self.visit(node.value)
+            self.instructions.append(IRReturn(value))
 
     def visit_IfStatement(self, node):
         else_label = self._unique_label("else")
         end_label = self._unique_label("endif")
-        condition = self.visit(node.condition)
-        self.instructions.append(IRIfGoto(f"!{condition}", else_label))
+
+        cond = self.visit(node.condition)
+
+        negated = self.temp.new_temp()
+        self.instructions.append(IRUnary(negated, "!", cond))
+
+        self.instructions.append(IRIfGoto(negated, else_label))
         self.visit(node.then_block)
         self.instructions.append(IRGoto(end_label))
         self.instructions.append(IRLabel(else_label))
@@ -92,14 +114,31 @@ class IRGenerator:
         self.instructions.append(IRFunctionEnd(func_name))
 
     def visit_FunctionCall(self, node):
-        args = [self.visit(arg) for arg in node.arguments]
+        args = []
+        for arg in node.arguments:
+            val = self.visit(arg)
+            # если это вызов, уже IRCall, то будет обработан до
+            args.append(val)
         result = self.temp.new_temp()
         self.instructions.append(IRCall(result, f"func_{node.name}", args))
         return result
 
     def visit_BinaryOp(self, node):
+        # Обрабатываем левый и правый аргументы
         left = self.visit(node.left)
         right = self.visit(node.right)
+
+        # если результат вложенной функции — не переменная, сохранить в temp
+        if isinstance(node.left, IRCall):
+            tmp_left = self.temp.new_temp()
+            self.instructions.append(IRAssign(tmp_left, left))
+            left = tmp_left
+
+        if isinstance(node.right, IRCall):
+            tmp_right = self.temp.new_temp()
+            self.instructions.append(IRAssign(tmp_right, right))
+            right = tmp_right
+
         result = self.temp.new_temp()
         self.instructions.append(IRBinary(result, left, node.op, right))
         return result

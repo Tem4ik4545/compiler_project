@@ -34,9 +34,12 @@ def run_ir_test(code: str, description: str):
 def main():
     code = r'''
     {
+
+        let m: float = 3.1415926;
+        v = m + 1;
+        
         let a: bool = true;
         let b: bool = false;
-
         if (a && !b || false) {
             print("ok");
         }

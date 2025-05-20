@@ -1,7 +1,7 @@
 {
-
     print("Hello, MyLang!");
     print(42);
+
     let x: int = 5;
     let y: int = 10;
     let z: int = x + y;
@@ -56,4 +56,28 @@
 
     let r: int = total7(1, 2, 3, 4, 5, 6, 7);
     print(r);
+
+
+    let a: int = 1;
+    let b: int = 0;
+    if (a == 1 || b == 1) {
+        print(100);
+    }
+
+    if (!(a == 0)) {
+        print(200);
+    }
+
+    if (x > 0 && y != 5) {
+        print(300);
+    }
+
+
+    add(1, 2);
+
+    let k: bool = true;
+    let l: bool = false;
+    if (k && !l || false) {
+        print(1);
+    }
 }

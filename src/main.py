@@ -33,11 +33,13 @@ def compile_source(source_file: str, output_file: str):
     print("✅ IR сгенерирован")
 
     # 5. Оптимизация IR
-    optimized_ir = IROptimizer().optimize(ir)
-    print("✅ IR оптимизирован")
+    #optimized_ir = IROptimizer().optimize(ir)
+    #print("✅ IR оптимизирован")
 
     # 6. Генерация NASM
-    nasm_code = NASMGenerator().generate(optimized_ir)
+    nasm_code = NASMGenerator().generate(ir)
+
+    print("✅ Используется NASMGenerator из:", NASMGenerator.__module__)
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(nasm_code)

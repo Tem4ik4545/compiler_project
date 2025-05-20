@@ -174,14 +174,15 @@ class ASTBuilder(MyLangVisitor):
             right = right[0]
         return BinaryOp(left, ctx.getChild(1).getText(), right)
 
-    def visitExprLogical(self, ctx: MyLangParser.ExprLogicalContext):
+    def visitExprLogicalAnd(self, ctx: MyLangParser.ExprLogicalAndContext):
         left = self.visit(ctx.expression(0))
         right = self.visit(ctx.expression(1))
-        if isinstance(left, list):
-            left = left[0]
-        if isinstance(right, list):
-            right = right[0]
-        return BinaryOp(left, ctx.getChild(1).getText(), right)
+        return BinaryOp(left, '&&', right)
+
+    def visitExprLogicalOr(self, ctx: MyLangParser.ExprLogicalOrContext):
+        left = self.visit(ctx.expression(0))
+        right = self.visit(ctx.expression(1))
+        return BinaryOp(left, '||', right)
 
     def visitExprIdentifier(self, ctx: MyLangParser.ExprIdentifierContext):
         name = ctx.ID().getText()
