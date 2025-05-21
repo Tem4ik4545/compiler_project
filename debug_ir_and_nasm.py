@@ -37,11 +37,16 @@ def debug_compile(source_file: str):
         print(instr)
     print()
 
-
+    # 5. IR после оптимизации
+    optimized_ir = IROptimizer().optimize(ir)
+    print("=== 🧾 IR после оптимизации ===")
+    for instr in optimized_ir:
+        print(instr)
+    print()
 
     # 6. NASM
     print("=== ⚙️ NASM-код ===")
-    nasm_code = NASMGenerator().generate(ir)
+    nasm_code = NASMGenerator().generate(optimized_ir)
     print(nasm_code)
 
 if __name__ == "__main__":

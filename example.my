@@ -80,4 +80,9 @@
     if (k && !l || false) {
         print(1);
     }
+
+    if (true) {
+        print("yes");
+    }
+
 }

@@ -14,22 +14,22 @@ class IROptimizer:
     def constant_folding(self, instructions):
         result = []
         for instr in instructions:
-            if isinstance(instr, IRBinary) \
-               and isinstance(instr.left, (int, float)) \
-               and isinstance(instr.right, (int, float)):
-                if instr.op == "+":
-                    v = instr.left + instr.right
-                elif instr.op == "-":
-                    v = instr.left - instr.right
-                elif instr.op == "*":
-                    v = instr.left * instr.right
-                elif instr.op == "/":
-                    v = instr.left / instr.right if instr.right != 0 else 0
-                else:
+            if isinstance(instr, IRBinary) and isinstance(instr.left, (int, float)) and isinstance(instr.right, (int, float)):
+                try:
+                    if instr.op == "+":
+                        v = instr.left + instr.right
+                    elif instr.op == "-":
+                        v = instr.left - instr.right
+                    elif instr.op == "*":
+                        v = instr.left * instr.right
+                    elif instr.op == "/":
+                        v = instr.left / instr.right if instr.right != 0 else 0
+                    else:
+                        result.append(instr)
+                        continue
+                    result.append(IRAssign(instr.result, v))
+                except Exception:
                     result.append(instr)
-                    continue
-                # вместо IRBinary — подставляем прямую константу
-                result.append(IRAssign(instr.result, v))
             else:
                 result.append(instr)
         return result
@@ -38,52 +38,35 @@ class IROptimizer:
         result = []
         env = {}
 
-        def is_user_var(name):
-            return isinstance(name, str) and not name.startswith("t") and not name.isdigit()
+        def is_temp(n):
+            return isinstance(n, str) and n.startswith("t")
 
         for instr in instructions:
-            # оставляем «как есть» границы функций и метки
+
             if isinstance(instr, (IRFunctionStart, IRFunctionEnd, IRLabel)):
                 result.append(instr)
+                env.clear()
                 continue
 
-            if isinstance(instr, IRAssign):
-                val = instr.value
-                # если это пользовательская переменная и в env есть её замена — подставляем
-                if is_user_var(val) and val in env:
-                    val = env[val]
-                result.append(IRAssign(instr.target, val))
-                # запоминаем только подстановки между user-vars, не трогаем temps
-                if is_user_var(instr.target) and is_user_var(instr.value):
-                    env[instr.target] = val
+            if isinstance(instr, IRAssign) \
+                    and is_temp(instr.target) \
+                    and isinstance(instr.value, str) \
+                    and is_temp(instr.value):
+                src = instr.value
+                final = env.get(src, src)
+                result.append(IRAssign(instr.target, final))
 
-            elif isinstance(instr, IRBinary):
-                L, R = instr.left, instr.right
-                if is_user_var(L) and L in env:
-                    L = env[L]
-                if is_user_var(R) and R in env:
-                    R = env[R]
-                result.append(IRBinary(L, R, instr.op, instr.result))
-
-            elif isinstance(instr, IRPrint):
-                v = instr.value
-                if is_user_var(v) and v in env:
-                    v = env[v]
-                result.append(IRPrint(v))
-
-            elif isinstance(instr, IRIfGoto):
-                c = instr.condition
-                if is_user_var(c) and c in env:
-                    c = env[c]
-                result.append(IRIfGoto(c, instr.label))
-
-            elif isinstance(instr, IRCall):
-                # полностью не трогаем имя функции и её целевой temp
-                result.append(instr)
-
+                env.pop(instr.target, None)
+                env[instr.target] = final
             else:
                 result.append(instr)
-
+                if isinstance(instr, (IRBinary, IRAssign, IRCall)) and hasattr(instr, 'result') and is_temp(
+                        instr.result):
+                    env.pop(instr.result, None)
+                if isinstance(instr, IRAssign) and is_temp(instr.target):
+                    env.pop(instr.target, None)
+                if isinstance(instr, IRCall) and instr.target is not None and is_temp(instr.target):
+                    env.pop(instr.target, None)
         return result
 
     def remove_unused_temps(self, instructions):
@@ -104,22 +87,15 @@ class IROptimizer:
             elif isinstance(instr, IRAssign) and isinstance(instr.value, str):
                 used.add(instr.value)
 
-        # удаляем только чисто временные присваивания, начинающиеся на "t"
         cleaned = []
         for instr in instructions:
-            if isinstance(instr, IRAssign) \
-               and isinstance(instr.target, str) \
-               and instr.target.startswith("t") \
-               and instr.target not in used:
+            if isinstance(instr, IRAssign) and isinstance(instr.target, str) and instr.target.startswith("t") and instr.target not in used:
                 continue
             cleaned.append(instr)
         return cleaned
 
     def remove_self_assignments(self, instructions):
-        return [
-            instr for instr in instructions
-            if not (isinstance(instr, IRAssign) and instr.target == instr.value)
-        ]
+        return [instr for instr in instructions if not (isinstance(instr, IRAssign) and instr.target == instr.value)]
 
     def simplify_if_true(self, instructions):
         result = []
@@ -128,8 +104,19 @@ class IROptimizer:
                 if instr.condition == "true" or instr.condition is True:
                     result.append(IRGoto(instr.label))
                 elif instr.condition == "false" or instr.condition is False:
-                    # if false — просто удаляем
                     continue
+                elif isinstance(instr.condition, str) and instr.condition.startswith("t"):
+                    # Попробуем найти присвоение tN = !True или !False
+                    prev = result[-1] if result else None
+                    if isinstance(prev, IRAssign) and prev.target == instr.condition:
+                        if prev.value == "!True":
+                            continue  # t = !True → false → условие не выполняется
+                        if prev.value == "!False":
+                            result.append(IRGoto(instr.label))  # условие всегда истина
+                        else:
+                            result.append(instr)
+                    else:
+                        result.append(instr)
                 else:
                     result.append(instr)
             else:
@@ -140,13 +127,11 @@ class IROptimizer:
         result = []
         skip = False
         for instr in instructions:
-            # всегда сохраняем границы функций
             if isinstance(instr, (IRFunctionStart, IRFunctionEnd)):
                 result.append(instr)
                 skip = False
                 continue
             if skip:
-                # игнорим всё до конца функции
                 continue
             result.append(instr)
             if isinstance(instr, IRReturn):
