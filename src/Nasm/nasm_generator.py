@@ -8,7 +8,9 @@ class NASMGenerator:
         self.label_counter = 0
         self.win64_registers = ["rcx", "rdx", "r8", "r9"]
         self.string_literals = {}
+        self.float_literals = {}  # Отдельный словарь для float-литералов
         self.string_counter = 0
+        self.float_counter = 0    # Счётчик для float-литералов
         self.defined_labels = set()
         self.defined_functions = set()
         self.shadow_space = 32
@@ -30,7 +32,9 @@ class NASMGenerator:
         self.emit("section .data")
         self.emit("newline    db 10, 0")
         self.emit('format     db "%d", 10, 0')
+        self.emit('format_float db "%.6f", 10, 0')
         self.emit('format_str db "%s", 10, 0')
+        self.emit('div_zero_err db "Error: division by zero", 10, 0')
         if any(val.lower() == "true" for instr in instructions for val in vars(instr).values() if isinstance(val, str)):
             self.emit("True dq 1")
         if any(val.lower() == "false" for instr in instructions for val in vars(instr).values() if
@@ -39,6 +43,7 @@ class NASMGenerator:
         self.collect_variables(instructions)
         self.extract_string_literals(instructions)
         self.emit_string_literals()
+        self.emit_float_literals()
 
         self.emit("section .text")
         self.emit("default rel")
@@ -75,6 +80,20 @@ class NASMGenerator:
         self.emit("    xor  ecx, ecx")
         self.emit("    call ExitProcess")
         self.emit(f"    add  rsp, {self.shadow_space}")
+
+        self.emit("_float_div_zero:")
+        self.emit("    sub rsp, 32")
+        self.emit("    lea rcx, [rel div_zero_err]")
+        self.emit("    xor rax, rax")
+        self.emit("    call printf")
+        self.emit("    call ExitProcess")
+
+        self.emit("_int_div_zero:")
+        self.emit("    sub rsp, 32")
+        self.emit("    lea rcx, [rel div_zero_err]")
+        self.emit("    xor rax, rax")
+        self.emit("    call printf")
+        self.emit("    call ExitProcess")
         return "\n".join(self.lines)
 
     def emit(self, line):
@@ -82,7 +101,25 @@ class NASMGenerator:
 
     def emit_string_literals(self):
         for name, value in self.string_literals.items():
-            self.emit(f'{name} db "{value}", 10, 0')
+            self.emit(f'{name} db "{value}", 0')
+
+    def emit_float_literals(self):
+        for name, value in self.float_literals.items():
+            self.emit("align 4")
+            self.emit(f"{name} dd {value}")
+
+    def _is_number_literal(self, var: str) -> bool:
+        try:
+            float(var)
+            return True
+        except ValueError:
+            return False
+    def _check_and_store_float(self, val):
+        if isinstance(val, str) and '.' in val:
+            if val not in self.float_literals.values():
+                name = f"float_{self.float_counter}"
+                self.float_literals[name] = val
+                self.float_counter += 1
 
     def extract_string_literals(self, instructions):
         for instr in instructions:
@@ -101,7 +138,17 @@ class NASMGenerator:
         seen = set()
         func_names = {instr.name for instr in instructions if isinstance(instr, IRFunctionStart)}
         for instr in instructions:
-            for attr in ("target", "result", "left", "right", "value", "condition"):
+            for attr in ("value", "left", "right"):
+                if hasattr(instr, attr):
+                    val = getattr(instr, attr)
+                    self._check_and_store_float(val)
+            for attr in ("target", "result"):
+                if hasattr(instr, attr):
+                    val = getattr(instr, attr)
+                    if isinstance(val, str):
+                        var_type = getattr(instr, "type_", None)
+                        self._add_variable(val, seen, func_names, var_type)
+            for attr in ("left", "right", "value", "condition"):
                 if hasattr(instr, attr):
                     val = getattr(instr, attr)
                     if isinstance(val, str):
@@ -114,23 +161,40 @@ class NASMGenerator:
                     if isinstance(arg, str):
                         self._add_variable(arg, seen, func_names)
 
-    def _add_variable(self, var, seen, func_names):
-        if (not var or not isinstance(var, str)
+    def _add_variable(self, var, seen, func_names, var_type_hint=None):
+        if (var in seen
+                or not isinstance(var, str)
                 or var.isdigit()
-                or var.startswith('"') and var.endswith('"')
+                or self._is_number_literal(var)  # <- новая проверка
+                or var.startswith('"')
                 or any(var.startswith(p) for p in self.skip_prefixes)
                 or var in func_names
                 or var.startswith("str_")
-                or var in ("True", "False")):  # <== добавлено
+                or var in ("True", "False")):
             return
-        if var in seen:
-            return
+
+        var_type = var_type_hint or "int"
+        for instr in self.ir_instructions:
+            if isinstance(instr, IRAssign) and instr.target == var:
+                var_type = instr.type_ or var_type
+                break
+
         seen.add(var)
         self.defined_variables.add(var)
-        self.emit(f"{var} dq 0")
 
-    def resolve_value(self, val):
+        if var_type == "float":
+            self.emit("align 4")
+            self.emit(f"{var} dd 0.0")  # 32-битный float
+        else:
+            self.emit(f"{var} dq 0")  # 64-битный int
+
+    def resolve_value(self, val, type_=None):
         if isinstance(val, str):
+            if '.' in val and (type_ == "float" or any(c.isalpha() for c in val)):
+                for name, v in self.float_literals.items():
+                    if v == val:
+                        return f"[rel {name}]"
+                return val
             if val.startswith('"'):
                 txt = val.strip('"')
                 for name, v in self.string_literals.items():
@@ -159,6 +223,20 @@ class NASMGenerator:
                 return instr.params
         return []
 
+    def _get_var_type(self, var_name: str) -> str:
+        """Возвращает тип переменной по её имени из IR-инструкций."""
+        if isinstance(var_name, str):
+            if var_name.startswith('"'):
+                return "string"
+            elif '.' in var_name and var_name.replace('.', '').replace('-', '').isdigit():
+                return "float"
+        for instr in self.ir_instructions:
+            if hasattr(instr, "target") and getattr(instr, "target") == var_name:
+                return getattr(instr, "type_", "int")
+            if hasattr(instr, "result") and getattr(instr, "result") == var_name:
+                return getattr(instr, "type_", "int")
+        return "int"
+
     def translate(self, instr):
         if isinstance(instr, IRLabel):
             if instr.label not in self.defined_labels:
@@ -167,28 +245,51 @@ class NASMGenerator:
             return
 
         if isinstance(instr, IRAssign):
-            self.emit(f"    mov rax, {self.resolve_value(instr.value)}")
-            self.emit(f"    mov [rel {instr.target}], rax")
+            if instr.type_ == "float":
+                self.emit(f"    movss xmm0, {self.resolve_value(instr.value, 'float')}")
+                self.emit(f"    movss [rel {instr.target}], xmm0")
+            else:
+                self.emit(f"    mov rax, {self.resolve_value(instr.value)}")
+                self.emit(f"    mov [rel {instr.target}], rax")
             return
 
         if isinstance(instr, IRBinary):
             if instr.op in ("&&", "||"):
                 self.translate_logical(instr)
                 return
-            self.emit(f"    mov rax, {self.resolve_value(instr.left)}")
-            if instr.op == "/":
-                self.emit("    cqo")
-                self.emit(f"    mov rbx, {self.resolve_value(instr.right)}")
-                self.emit("    idiv rbx")
-            elif instr.op in {"+", "-", "*"}:
-                op_map = {"+": "add", "-": "sub", "*": "imul"}
-                self.emit(f"    {op_map[instr.op]} rax, {self.resolve_value(instr.right)}")
+            if instr.type_ == "float":
+                self.emit(f"    movss xmm0, {self.resolve_value(instr.left, 'float')}")
+                self.emit(f"    movss xmm1, {self.resolve_value(instr.right, 'float')}")
+                if instr.op == '+':
+                    self.emit("    addss xmm0, xmm1")
+                elif instr.op == '-':
+                    self.emit("    subss xmm0, xmm1")
+                elif instr.op == '*':
+                    self.emit("    mulss xmm0, xmm1")
+                elif instr.op == '/':
+                    self.emit("    movss xmm2, xmm1")
+                    self.emit("    xorps xmm3, xmm3")
+                    self.emit("    ucomiss xmm2, xmm3")
+                    self.emit("    je _float_div_zero")
+                    self.emit("    divss xmm0, xmm1")
+                self.emit(f"    movss [rel {instr.result}], xmm0")
             else:
-                cmp_map = {"==": "sete", "!=": "setne", "<": "setl", ">": "setg"}
-                self.emit(f"    cmp rax, {self.resolve_value(instr.right)}")
-                self.emit(f"    {cmp_map[instr.op]} al")
-                self.emit("    movzx rax, al")
-            self.emit(f"    mov [rel {instr.result}], rax")
+                self.emit(f"    mov rax, {self.resolve_value(instr.left)}")
+                if instr.op == "/":
+                    self.emit(f"    mov rbx, {self.resolve_value(instr.right)}")
+                    self.emit("    cmp rbx, 0")
+                    self.emit("    je _int_div_zero")
+                    self.emit("    cqo")
+                    self.emit("    idiv rbx")
+                elif instr.op in {"+", "-", "*"}:
+                    op_map = {"+": "add", "-": "sub", "*": "imul"}
+                    self.emit(f"    {op_map[instr.op]} rax, {self.resolve_value(instr.right)}")
+                else:
+                    cmp_map = {"==": "sete", "!=": "setne", "<": "setl", ">": "setg"}
+                    self.emit(f"    cmp rax, {self.resolve_value(instr.right)}")
+                    self.emit(f"    {cmp_map[instr.op]} al")
+                    self.emit("    movzx rax, al")
+                self.emit(f"    mov [rel {instr.result}], rax")
             return
 
         if isinstance(instr, IRUnary):
@@ -201,15 +302,23 @@ class NASMGenerator:
             return
 
         if isinstance(instr, IRPrint):
-            val = self.resolve_value(instr.value)
+            var_type = instr.type_ if hasattr(instr, 'type_') and instr.type_ else self._get_var_type(instr.value)
+            val = self.resolve_value(instr.value, var_type)
             self.emit(f"    sub rsp, {self.shadow_space}")
-            if val.startswith("[rel str_"):
+            if var_type == "float":
+                self.emit(f"    movss xmm0, {val}")
+                self.emit("    cvtss2sd xmm0, xmm0")
+                self.emit("    movq rdx, xmm0")
+                self.emit("    mov rcx, format_float")
+                self.emit("    mov rax, 1")
+            elif var_type == "string":
                 self.emit(f"    lea rdx, {val}")
                 self.emit("    mov rcx, format_str")
+                self.emit("    xor rax, rax")
             else:
                 self.emit(f"    mov rdx, {val}")
                 self.emit("    mov rcx, format")
-            self.emit("    xor rax, rax")
+                self.emit("    xor rax, rax")
             self.emit("    call printf")
             self.emit(f"    add rsp, {self.shadow_space}")
             return

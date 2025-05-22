@@ -1,5 +1,7 @@
 from src.IR.temp_manager import TempManager
 from src.IR.instructions import *
+from src.semantic.symbol_table import SymbolTable
+from src.AST.Karkas import Literal, Identifier, BinaryOp
 
 class IRGenerator:
     def __init__(self):
@@ -7,6 +9,7 @@ class IRGenerator:
         self.instructions = []
         self.defined_funcs = set()
         self.generated_labels = set()
+        self.current_scope = SymbolTable()
 
     def generate(self, node):
         self.instructions = []
@@ -34,18 +37,41 @@ class IRGenerator:
 
     def visit_VarDeclaration(self, node):
         value = self.visit(node.value)
+        self.current_scope.define(node.name, node.type_)
         if isinstance(value, (IRCall, IRBinary, IRUnary)):
-            self.instructions.append(IRAssign(node.name, value.result))
+            self.instructions.append(IRAssign(node.name, value.result, type_=node.type_))
         else:
-            self.instructions.append(IRAssign(node.name, value))
+            self.instructions.append(IRAssign(node.name, value, type_=node.type_))
+
+
 
     def visit_Assignment(self, node):
         value = self.visit(node.value)
         self.instructions.append(IRAssign(node.name, value))
 
+    def visit_expression(self, node):
+        if isinstance(node, Literal):
+            if isinstance(node.value, str):
+                return "string"
+            elif isinstance(node.value, int):
+                return "int"
+            elif isinstance(node.value, float):
+                return "float"
+            elif isinstance(node.value, bool):
+                return "bool"
+        elif isinstance(node, Identifier):
+            symbol = self.current_scope.lookup(node.name)
+            if symbol:
+                return symbol.type_
+        elif isinstance(node, BinaryOp):
+            return node.type_
+
+        return "int"
+
     def visit_PrintStatement(self, node):
+        expr_type = self.visit_expression(node.expression)
         value = self.visit(node.expression)
-        self.instructions.append(IRPrint(value))
+        self.instructions.append(IRPrint(value, expr_type))
 
     def visit_ReturnStatement(self, node):
         if node.value is None:
@@ -105,13 +131,25 @@ class IRGenerator:
         self.instructions.append(IRLabel(end_label))
 
     def visit_FunctionDeclaration(self, node):
+        # Создаём новую область видимости для функции
+        func_scope = SymbolTable(parent=self.current_scope)
+        self.current_scope = func_scope  # Обновляем текущую область
+
         func_name = f"func_{node.name}"
         if func_name in self.defined_funcs:
             return
+
+        # Добавляем параметры функции в область видимости
+        for param_name, param_type in node.params:
+            func_scope.define(param_name, param_type)
+
         self.defined_funcs.add(func_name)
         self.instructions.append(IRFunctionStart(func_name, [name for name, _ in node.params]))
         self.visit(node.body)
         self.instructions.append(IRFunctionEnd(func_name))
+
+        # Возвращаемся к родительской области видимости
+        self.current_scope = func_scope.parent
 
     def visit_FunctionCall(self, node):
         args = []
@@ -140,7 +178,7 @@ class IRGenerator:
             right = tmp_right
 
         result = self.temp.new_temp()
-        self.instructions.append(IRBinary(result, left, node.op, right))
+        self.instructions.append(IRBinary(result, left, node.op, right, type_=node.type_))  # Передаём тип
         return result
 
     def visit_UnaryOp(self, node):
@@ -150,10 +188,24 @@ class IRGenerator:
         return result
 
     def visit_Identifier(self, node):
+        if not self.current_scope:
+            raise Exception("Ошибка: Область видимости не инициализирована")
+
+        # Ищем переменную в текущей области и родительских
+        symbol = self.current_scope.lookup(node.name)
+        if not symbol:
+            raise Exception(f"Ошибка: Переменная '{node.name}' не объявлена")
+
+        # Аннотируем узел типом из таблицы символов
+        node.type_ = symbol.type_
         return node.name
 
     def visit_Literal(self, node):
-        if isinstance(node.value, str):
+        if isinstance(node.value, float):
+            node.type_ = "float"
+        elif isinstance(node.value, int):
+            node.type_ = "int"
+        elif isinstance(node.value, str):
             return f'"{node.value}"'
         return str(node.value)
 

@@ -85,4 +85,11 @@
         print("yes");
     }
 
+    let m: float = 3.1415926;
+    let c: float = m / 2.0;
+    print(c);
+
+    let f: float = m / 0.0;
+    print(f);
+
 }

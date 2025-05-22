@@ -3,18 +3,22 @@ class IRInstruction:
 
 
 class IRAssign(IRInstruction):
-    def __init__(self, target, value):
+    def __init__(self, target, value, type_=None):
         self.target = target
         self.value = value
+        self.type_ = type_
     def __repr__(self):
-        return f"{self.target} = {self.value}"
+        type_str = f" (type={self.type_})" if self.type_ else ""
+        return f"{self.target} = {self.value}{type_str}"
 
 
 class IRPrint(IRInstruction):
-    def __init__(self, value):
+    def __init__(self, value, type_=None):
         self.value = value
+        self.type_ = type_
     def __repr__(self):
-        return f"print {self.value}"
+        type_str = f" (type={self.type_})" if self.type_ else ""
+        return f"print {self.value}{type_str}"
 
 
 class IRReturn(IRInstruction):
@@ -73,13 +77,15 @@ class IRFunctionEnd:
 
 
 class IRBinary(IRInstruction):
-    def __init__(self, result, left, op, right):
+    def __init__(self, result, left, op, right, type_=None):
         self.result = result
         self.left = left
         self.op = op
         self.right = right
+        self.type_ = type_
     def __repr__(self):
-        return f"{self.result} = {self.left} {self.op} {self.right}"
+        type_str = f" (type={self.type_})" if self.type_ else ""
+        return f"{self.result} = {self.left} {self.op} {self.right}{type_str}"
 
 
 class IRUnary(IRInstruction):

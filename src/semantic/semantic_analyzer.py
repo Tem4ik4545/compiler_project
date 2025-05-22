@@ -115,7 +115,9 @@ class SemanticAnalyzer:
         elif isinstance(node, BinaryOp):
             left_type = self.visit_expression(node.left, scope)
             right_type = self.visit_expression(node.right, scope)
-            return check_binary_op(left_type, node.op, right_type)
+            result_type = check_binary_op(left_type, node.op, right_type)
+            node.type_ = result_type  # Сохраняем тип в узле
+            return result_type
 
         elif isinstance(node, UnaryOp):
             operand_type = self.visit_expression(node.operand, scope)

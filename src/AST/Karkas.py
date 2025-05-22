@@ -36,10 +36,11 @@ class Assignment(ASTNode):
 
 
 class BinaryOp(ASTNode):
-    def __init__(self, left: ASTNode, op: str, right: ASTNode):
+    def __init__(self, left: ASTNode, op: str, right: ASTNode, type_=None):
         self.left = left
         self.op = op
         self.right = right
+        self.type_ = type_
 
     def __repr__(self):
         return f"BinaryOp({self.left} {self.op} {self.right})"

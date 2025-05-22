@@ -1,7 +1,9 @@
 section .data
 newline    db 10, 0
 format     db "%d", 10, 0
+format_float db "%.6f", 10, 0
 format_str db "%s", 10, 0
+div_zero_err db "Error: division by zero", 10, 0
 True dq 1
 False dq 0
 x dq 0
@@ -31,10 +33,12 @@ t14 dq 0
 t15 dq 0
 t16 dq 0
 total dq 0
-c dq 0
+align 4
+c dd 0.0
 d dq 0
 e dq 0
-f dq 0
+align 4
+f dd 0.0
 g dq 0
 t17 dq 0
 t18 dq 0
@@ -63,8 +67,20 @@ t37 dq 0
 t38 dq 0
 t39 dq 0
 t40 dq 0
-str_0 db "Hello, MyLang!", 10, 0
-str_1 db "yes", 10, 0
+align 4
+m dd 0.0
+align 4
+t41 dd 0.0
+align 4
+t42 dd 0.0
+str_0 db "Hello, MyLang!", 0
+str_1 db "yes", 0
+align 4
+float_0 dd 3.1415926
+align 4
+float_1 dd 2.0
+align 4
+float_2 dd 0.0
 section .text
 default rel
 extern printf
@@ -554,6 +570,56 @@ endif_20:
     jmp endif_22
 else_21:
 endif_22:
+    movss xmm0, [rel float_0]
+    movss [rel m], xmm0
+    movss xmm0, [rel m]
+    movss xmm1, [rel float_1]
+    movss xmm2, xmm1
+    xorps xmm3, xmm3
+    ucomiss xmm2, xmm3
+    je _float_div_zero
+    divss xmm0, xmm1
+    movss [rel t41], xmm0
+    movss xmm0, [rel t41]
+    movss [rel c], xmm0
+    sub rsp, 32
+    movss xmm0, [rel c]
+    cvtss2sd xmm0, xmm0
+    movq rdx, xmm0
+    mov rcx, format_float
+    mov rax, 1
+    call printf
+    add rsp, 32
+    movss xmm0, [rel m]
+    movss xmm1, [rel float_2]
+    movss xmm2, xmm1
+    xorps xmm3, xmm3
+    ucomiss xmm2, xmm3
+    je _float_div_zero
+    divss xmm0, xmm1
+    movss [rel t42], xmm0
+    movss xmm0, [rel t42]
+    movss [rel f], xmm0
+    sub rsp, 32
+    movss xmm0, [rel f]
+    cvtss2sd xmm0, xmm0
+    movq rdx, xmm0
+    mov rcx, format_float
+    mov rax, 1
+    call printf
+    add rsp, 32
     xor  ecx, ecx
     call ExitProcess
     add  rsp, 32
+_float_div_zero:
+    sub rsp, 32
+    lea rcx, [rel div_zero_err]
+    xor rax, rax
+    call printf
+    call ExitProcess
+_int_div_zero:
+    sub rsp, 32
+    lea rcx, [rel div_zero_err]
+    xor rax, rax
+    call printf
+    call ExitProcess
