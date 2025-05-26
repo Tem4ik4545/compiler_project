@@ -165,7 +165,7 @@ class NASMGenerator:
         if (var in seen
                 or not isinstance(var, str)
                 or var.isdigit()
-                or self._is_number_literal(var)  # <- новая проверка
+                or self._is_number_literal(var)
                 or var.startswith('"')
                 or any(var.startswith(p) for p in self.skip_prefixes)
                 or var in func_names

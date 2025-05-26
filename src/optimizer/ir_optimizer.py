@@ -106,13 +106,13 @@ class IROptimizer:
                 elif instr.condition == "false" or instr.condition is False:
                     continue
                 elif isinstance(instr.condition, str) and instr.condition.startswith("t"):
-                    # Попробуем найти присвоение tN = !True или !False
+
                     prev = result[-1] if result else None
                     if isinstance(prev, IRAssign) and prev.target == instr.condition:
                         if prev.value == "!True":
-                            continue  # t = !True → false → условие не выполняется
+                            continue
                         if prev.value == "!False":
-                            result.append(IRGoto(instr.label))  # условие всегда истина
+                            result.append(IRGoto(instr.label))
                         else:
                             result.append(instr)
                     else:
